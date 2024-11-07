@@ -13,8 +13,8 @@ def sanitize_filename(filename):
     return filename.replace('/', ' ').strip()
 
 
-def download(jsonFilePath, downloadPath):
-    with open(jsonFilePath, 'r') as file:
+def download(json_filepath, download_path):
+    with open(json_filepath, 'r') as file:
         data = json.load(file)
 
     pdf_links =[link for link in data.values()]
@@ -26,11 +26,11 @@ def download(jsonFilePath, downloadPath):
             file_name = content_disposition.split('filename=')[1].strip(' "')
 
         else:
-            parsedUrl = urlparse(link)
-            file_name = os.path.basename(parsedUrl.path)
+            parsed_url = urlparse(link)
+            file_name = os.path.basename(parsed_url.path)
         file_name = sanitize_filename(file_name)
-        file_path = os.path.join(downloadPath,file_name)
-        with open(file_path,'wb') as r:
+        file_path = os.path.join(download_path, file_name)
+        with open(file_path, 'wb') as r:
             for chunk in response.iter_content(chunk_size=1024):
                 r.write(chunk)
 

@@ -1,26 +1,32 @@
-import PyPDF2
+import asyncio
+import fitz
 import os
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+import time
+from concurrent.futures import ThreadPoolExecutor
+import json
+import secrets
+import re
+from pymongo import MongoClient
 
 
 def parse_pdf(file_path):
     try:
-        with open(file_path, 'rb') as file:
-            reader = PyPDF2.PdfReader(file)
+        with fitz.open(file_path) as file:
             text = ""
-            for page in reader.pages:
-                text += page.extract_text()
-            metadata = {
-                "Document Name" : os.path.basename(file_path),
-                "Size in kb" : round(os.stat(file_path).st_size / 1024, 2),
-                "Time of Ingestion": da
+            for page_num in range(file.page_count):
+                page = file.load_page(page_num)
 
-            }
+                text += page.get_text()
+            metadata = [
+                os.path.basename(file_path),
+                round(os.stat(file_path).st_size / 1024, 2),
+                datetime.now().isoformat()
+            ]
 
-            return [file_path, meta_data, text]
+            return [metadata, text]
     except Exception as e:
-        return file_path, str(e)
+        return {"error": str(e), "file": file_path}
 
 
 def list_of_file(folder_path):
@@ -32,19 +38,71 @@ def list_of_file(folder_path):
     return files
 
 
-def extract_text_from_folder(folder_path):
+def text_cleaner(content):
+    cleaned_content = re.sub(r'\s([,.?!:;])', r'\1', content)  # removes extra space around punctuation
+    cleaned_content = re.sub(r'/+', '/', cleaned_content)  # removes extra ////
+    cleaned_content = re.sub(r'\.{2,}', '.', cleaned_content)  # removes extra ...
+    cleaned_content = re.sub(r'_+', '_', cleaned_content)  # removes extra ___
+    cleaned_content = cleaned_content.replace("\n", " ")  # removes /n/n
+    cleaned_content = re.sub(r'[\{\}\[\]]', '', cleaned_content)   # Remove any curly braces or square brackets
+
+    cleaned_content = ' '.join(cleaned_content.split())
+    return cleaned_content
+
+
+def convert_to_json(normal_data):
+    short_id = secrets.token_hex(4)
+    all_data = []
+    for i in range(len(normal_data)):
+        temp_data = {
+            "id": short_id,
+            "data": {
+                "Document Name ": normal_data[i][0][0],
+                "Size(in KB) ": normal_data[i][0][1],
+                "Time of Ingestion ": normal_data[i][0][2],
+                "Text ": text_cleaner(normal_data[i][1])
+
+            }
+        }
+        all_data.append(temp_data)
+    return all_data
+
+
+async def extract_text_from_folder(folder_path):
     pdf_files = list_of_file(folder_path)
-    with ThreadPoolExecutor() as executor:
 
-        # results = list(executor.map(parse_pdf, pdf_files))
-        pdf_texts = [parse_pdf(file_path) for file_path in pdf_files]
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        start_time = time.time()
 
-    return pdf_texts
+        results = await asyncio.gather(
+            *[loop.run_in_executor(executor, parse_pdf, file_path) for file_path in pdf_files]
+        )
 
+        print(f"Processing Time: {time.time() - start_time} seconds")
+    # print(convert_to_json(results))
+    return convert_to_json(results)
+
+
+def parser(folder):
+    json_data = asyncio.run(extract_text_from_folder(folder))
+    mongo_url = "mongodb://localhost:27017/"
+    database_name = "ingestionDB"
+    collections_name = "contentEntries"
+    client = MongoClient(mongo_url)
+    db = client[database_name]
+    collection = db[collections_name]
+    # inserting one by one for checking if any pdf have issue
+    for doc in json_data:
+        pdf_name = doc['data']["Document Name "]
+        try:
+            collection.insert_one(doc)
+            print(f"Successfully inserted document:{pdf_name}")
+        except Exception as e:
+            print(f"Document  {pdf_name} not uploaded")
+    pass
 
 
 folder = 'database'
-data = extract_text_from_folder(folder)
-print(data[0])
-# file = 'database/1699521350.pdf'
-# print(parse_pdf(file))
+
+parser(folder)
