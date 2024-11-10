@@ -4,10 +4,12 @@ import os
 from datetime import datetime
 import time
 from concurrent.futures import ThreadPoolExecutor
-import json
-import secrets
 import re
+from nltk.corpus import stopwords, words
 from pymongo import MongoClient
+
+english_words = set(words.words())
+stop_words = set(stopwords.words('english'))
 
 
 def parse_pdf(file_path):
@@ -45,22 +47,29 @@ def text_cleaner(content):
     cleaned_content = re.sub(r'_+', '_', cleaned_content)  # removes extra ___
     cleaned_content = cleaned_content.replace("\n", " ")  # removes /n/n
     cleaned_content = re.sub(r'[\{\}\[\]]', '', cleaned_content)   # Remove any curly braces or square brackets
+    cleaned_text = re.sub(r'[^A-Za-z\s]', '', cleaned_content)
+    cleaned_text = re.sub(r'[^\x00-\x7F]+', '', cleaned_text)  # Remove non-ASCII characters
 
-    cleaned_content = ' '.join(cleaned_content.split())
+    cleaned_text = cleaned_text.lower()
+    cleaned_text = cleaned_text.split()
+    ans = []
+    for word in cleaned_text:
+        if len(word) != 1:
+            if word in english_words and word not in stop_words:
+                ans.append(word)
+    cleaned_content = ' '.join(ans)
     return cleaned_content
 
 
 def convert_to_json(normal_data):
-    short_id = secrets.token_hex(4)
     all_data = []
     for i in range(len(normal_data)):
         temp_data = {
-            "id": short_id,
             "data": {
-                "Document Name ": normal_data[i][0][0],
-                "Size(in KB) ": normal_data[i][0][1],
-                "Time of Ingestion ": normal_data[i][0][2],
-                "Text ": text_cleaner(normal_data[i][1])
+                "Document Name": normal_data[i][0][0],
+                "Size(in KB)": normal_data[i][0][1],
+                "Time of Ingestion": normal_data[i][0][2],
+                "Text": text_cleaner(normal_data[i][1])
 
             }
         }
@@ -80,7 +89,6 @@ async def extract_text_from_folder(folder_path):
         )
 
         print(f"Processing Time: {time.time() - start_time} seconds")
-    # print(convert_to_json(results))
     return convert_to_json(results)
 
 
@@ -94,7 +102,7 @@ def parser(folder):
     collection = db[collections_name]
     # inserting one by one for checking if any pdf have issue
     for doc in json_data:
-        pdf_name = doc['data']["Document Name "]
+        pdf_name = doc['data']["Document Name"]
         try:
             collection.insert_one(doc)
             print(f"Successfully inserted document:{pdf_name}")
@@ -103,6 +111,4 @@ def parser(folder):
     pass
 
 
-folder = 'database'
 
-parser(folder)

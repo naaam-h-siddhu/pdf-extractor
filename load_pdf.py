@@ -6,10 +6,7 @@ from urllib.parse import urlparse
 
 
 def sanitize_filename(filename):
-    """Sanitize filename by replacing '/' with space and ensuring it's just the filename."""
-    # Extract the base filename, strip out any directory paths
     filename = os.path.basename(filename)
-    # Replace problematic characters
     return filename.replace('/', ' ').strip()
 
 
